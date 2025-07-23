@@ -1,0 +1,42 @@
+autoDetectedPackages:
+- com.ruyuan.eshop.address
+- com.ruyuan.eshop.common
+- com.ruyuan.eshop.customer
+- com.ruyuan.eshop.fulfill
+- com.ruyuan.eshop.generator
+- com.ruyuan.eshop.inventory
+- com.ruyuan.eshop.market
+- com.ruyuan.eshop.order
+- com.ruyuan.eshop.pay
+- com.ruyuan.eshop.product
+- com.ruyuan.eshop.risk
+- com.ruyuan.eshop.tms
+- com.ruyuan.eshop.wms
+enableAutoDetect: true
+entryDisplayConfig:
+  excludedPathPatterns: []
+  skipJsCss: true
+funcDisplayConfig:
+  skipConstructors: false
+  skipFieldAccess: true
+  skipFieldChange: true
+  skipGetters: false
+  skipNonProjectPackages: false
+  skipPrivateMethods: false
+  skipSetters: false
+ignoreSameClassCall: null
+ignoreSamePackageCall: null
+includedPackagePrefixes: null
+includedParentClasses: null
+maxColSize: 32
+maxNumFirst: 12
+maxNumFirstImportant: 1024
+maxNumHash: 3
+maxNumHashImportant: 256
+maxObjectDepth: 4
+maxStrSize: 4096
+name: xcodemap-filter
+recordMode: manual
+sourceDisplayConfig:
+  color: blue
+startOnDebug: false
