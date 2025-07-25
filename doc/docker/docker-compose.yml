@@ -1,0 +1,226 @@
+services:
+  mysql:
+    image: mysql:8.0.36
+    platform: linux/amd64
+    container_name: order-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init:/docker-entrypoint-initdb.d
+      - ./mysql/conf:/etc/mysql/conf.d
+    networks:
+      - order-network
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 1G
+
+
+  nacos:
+    # 镜像、容器名和重启策略是服务的基础
+    image: registry.cn-hangzhou.aliyuncs.com/xfg-studio/nacos-server:v2.2.3-slim
+    container_name: order-nacos
+    restart: always
+    environment:
+      # 1. 核心运行模式配置
+      - NACOS_STANDALONE=true
+      - NACOS_AUTH_ENABLE=false # 为简单起见，禁用认证
+
+      # 2. 数据库连接配置 (这是服务能持久化的关键)
+      - SPRING_DATASOURCE_PLATFORM=mysql
+      - MYSQL_SERVICE_HOST=mysql
+      - MYSQL_SERVICE_PORT=3306
+      - MYSQL_SERVICE_DB_NAME=nacos_config
+      - MYSQL_SERVICE_USER=order_user
+      - MYSQL_SERVICE_PASSWORD=order123456
+
+      # 3. JVM 内存配置 (对于生产环境或长时间运行非常重要)
+      - JVM_XMS=512m
+      - JVM_XMX=512m
+      - JVM_XMN=256m
+    volumes:
+      # 持久化日志，方便排错
+      - nacos_logs:/home/nacos/logs
+    ports:
+      # Nacos 运行所需的所有端口
+      - "8848:8848"
+      - "9848:9848"
+      - "9849:9849"
+    depends_on:
+      # 确保 MySQL 先于 Nacos 启动
+      - mysql
+    networks:
+      # 确保服务在同一个网络中，可以互相通信
+      - order-network
+
+  seata:
+    image: seataio/seata-server:1.4.2  # 使用较新但稳定的版本
+    container_name: order-seata
+    restart: always
+    ports:
+      - "8091:8091"
+    networks:
+      - order-network
+    environment:
+      # 基础配置
+      - SEATA_IP=0.0.0.0
+      - SEATA_PORT=8091
+
+      # 存储配置
+      - STORE_MODE=db
+      - STORE_DB_DATASOURCE=druid
+      - STORE_DB_DB_TYPE=mysql
+      - STORE_DB_DRIVER_CLASS_NAME=com.mysql.cj.jdbc.Driver
+      - STORE_DB_URL=jdbc:mysql://mysql:3306/seata?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+      - STORE_DB_USER=order_user
+      - STORE_DB_PASSWORD=order123456
+      - STORE_DB_MIN_CONN=5
+      - STORE_DB_MAX_CONN=30
+      - STORE_DB_GLOBAL_TABLE=global_table
+      - STORE_DB_BRANCH_TABLE=branch_table
+      - STORE_DB_LOCK_TABLE=lock_table
+      - STORE_DB_QUERY_LIMIT=100
+      - STORE_DB_MAX_WAIT=5000
+
+      # 注册中心配置
+      - SEATA_REGISTRY_TYPE=nacos
+      - SEATA_REGISTRY_NACOS_APPLICATION=seata-server
+      - SEATA_REGISTRY_NACOS_SERVER_ADDR=nacos:8848
+      - SEATA_REGISTRY_NACOS_GROUP=SEATA_GROUP
+      - SEATA_REGISTRY_NACOS_NAMESPACE=
+      - SEATA_REGISTRY_NACOS_CLUSTER=default
+
+      # 配置中心配置
+      - SEATA_CONFIG_TYPE=nacos
+      - SEATA_CONFIG_NACOS_SERVER_ADDR=nacos:8848
+      - SEATA_CONFIG_NACOS_GROUP=SEATA_GROUP
+      - SEATA_CONFIG_NACOS_NAMESPACE=
+    depends_on:
+      - nacos
+      - mysql
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+
+
+
+
+  redis:
+    image: redis:6.2.6
+    container_name: order-redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    networks:
+      - order-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:4.7.1
+    container_name: order-rocketmq-namesrv
+    restart: always
+    command: sh mqnamesrv
+    ports:
+      - "9876:9876"
+    volumes:
+      - rocketmq_namesrv_logs:/home/rocketmq/logs
+    environment:
+      - "JAVA_OPTS=-server -Xms128m -Xmx128m"
+    networks:
+      - order-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+        reservations:
+          memory: 128M
+
+  rocketmq-broker:
+    image: apache/rocketmq:4.7.1
+    container_name: order-rocketmq-broker
+    restart: always
+    command: sh mqbroker -n rocketmq-namesrv:9876
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+    volumes:
+      - rocketmq_broker_logs:/home/rocketmq/logs
+    depends_on:
+      - rocketmq-namesrv
+    environment:
+      # 减少 JVM 内存使用，为系统预留更多空间
+      - "JAVA_OPTS=-server -Xms256m -Xmx384m -Xmn128m -XX:+UseG1GC -XX:+PrintGCDetails"
+    networks:
+      - order-network
+
+  rocketmq-console:
+    image: apacherocketmq/rocketmq-console:2.0.0
+    container_name: order-rocketmq-console
+    restart: always
+    environment:
+      - JAVA_OPTS=-Drocketmq.namesrv.addr=rocketmq-namesrv:9876
+    ports:
+      - "8080:8080"
+    depends_on:
+      - rocketmq-namesrv
+    networks:
+      - order-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  xxl-job:
+    image: xuxueli/xxl-job-admin:2.3.0
+    container_name: order-xxl-job
+    restart: always
+    environment:
+      PARAMS: "--spring.datasource.url=jdbc:mysql://order_user:order123456@mysql:3306/xxl_job?allowPublicKeyRetrieval=true&useUnicode=true&characterEncoding=UTF8&autoReconnect=true&serverTimezone=Asia/Shanghai"
+      JAVA_OPTS: "-Xms512m -Xmx512m"
+    ports:
+      - "8081:8080"
+    depends_on:
+      - mysql
+    networks:
+      - order-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+volumes:
+  mysql_data:
+  redis_data:
+  nacos_data:
+  nacos_logs:
+  rocketmq_namesrv_logs:
+  rocketmq_broker_logs:
+
+networks:
+  order-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/16  # 使用不同的网段，避免与其他项目冲突
+          gateway: 172.21.0.1
